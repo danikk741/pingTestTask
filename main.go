@@ -9,10 +9,12 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
-	// "context"
 )
+
+var mutex sync.Mutex
 
 type stringList []string
 
@@ -111,7 +113,9 @@ func worker(queue chan Result, done, ks chan bool, res map[string]int) {
 	for true {
 		select {
 		case k := <-queue:
+			mutex.Lock()
 			res[k.url] = k.count
+			mutex.Unlock()
 			done <- true
 		case <-ks:
 			return
