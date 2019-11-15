@@ -4,13 +4,14 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
 	"strings"
+	"testing"
 	"time"
 	// "context"
-	// "sync"
 )
 
 type stringList []string
@@ -30,6 +31,9 @@ func (s *stringList) Set(value string) error {
 }
 
 func main() {
+	// var t *testing.T
+	// TestProg(t)
+
 	res := make(map[string]int)
 
 	text := flag.String("text", "", "Text to find. (Required)")
@@ -117,5 +121,34 @@ func worker(queue chan Result, worknumber int, done, ks chan bool, res map[strin
 		case <-ks:
 			return
 		}
+	}
+}
+
+func TestProg(t *testing.T) {
+	type testCase struct {
+		url   string
+		word  string
+		Count int
+	}
+	cases := []testCase{
+		{"ru.wikipedia.org/wiki/Go", "go", 83},
+		{"medium.com/rungo/working-in-go-workspace-3b0576e0534a", "go", 132},
+		{"azaza", "azaza", -1},
+	}
+
+	for _, test := range cases {
+		var res Result
+		log.Print("Start GET ", test.url, test.word)
+		inpCh := make(chan Result)
+		go getRequest(inpCh, test.url, &test.word)
+		res = <-inpCh
+
+		if test.Count != res.count {
+			log.Print("Fail\n")
+			t.Fail()
+			continue
+		}
+
+		log.Print("Success\n")
 	}
 }
