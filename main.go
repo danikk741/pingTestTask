@@ -47,18 +47,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// fmt.Printf("text: %s, urls: %v\n",
-	// 	*text,
-	// 	&urlsArray,
-	// )
-
-	killsignal := make(chan bool)
+	killroutines := make(chan bool)
 	queue := make(chan Result)
 	done := make(chan bool)
 
 	numberOfWorkers := 2
 	for i := 0; i < numberOfWorkers; i++ {
-		go worker(queue, i, done, killsignal, res)
+		go worker(queue, done, killroutines, res)
 	}
 
 	for _, u := range urlsArray {
@@ -69,7 +64,7 @@ func main() {
 		<-done
 	}
 
-	close(killsignal)
+	close(killroutines)
 	time.Sleep(2 * time.Second)
 	for val := range res {
 		if res[val] == -1 {
@@ -112,7 +107,7 @@ func getRequest(q chan Result, u string, word *string) {
 	q <- res
 }
 
-func worker(queue chan Result, worknumber int, done, ks chan bool, res map[string]int) {
+func worker(queue chan Result, done, ks chan bool, res map[string]int) {
 	for true {
 		select {
 		case k := <-queue:
