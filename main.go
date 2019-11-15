@@ -9,12 +9,17 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	// "context"
+	// "sync"
 )
 
-// Create a new type for a list of Strings
 type stringList []string
 
-// Implement the flag.Value interface
+type Result struct {
+	url   string
+	count int
+}
+
 func (s *stringList) String() string {
 	return fmt.Sprintf("%v", *s)
 }
@@ -25,7 +30,7 @@ func (s *stringList) Set(value string) error {
 }
 
 func main() {
-	// res := make(map[string]int)
+	res := make(map[string]int)
 
 	text := flag.String("text", "", "Text to find. (Required)")
 	var urlsArray stringList
@@ -38,99 +43,79 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("text: %s, urls: %v\n",
-		*text,
-		&urlsArray,
-	)
+	// fmt.Printf("text: %s, urls: %v\n",
+	// 	*text,
+	// 	&urlsArray,
+	// )
 
-	inputCh := createInputCh(urlsArray)
+	killsignal := make(chan bool)
+	queue := make(chan Result)
+	done := make(chan bool)
 
-	rout1 := getRequest(inputCh, *text)
-	rout2 := getRequest(inputCh, *text)
-	rout := fanIn(rout1, rout2)
-
-	for i := 0; i < len(urlsArray); i++ {
-		fmt.Println("res", <-rout)
+	numberOfWorkers := 2
+	for i := 0; i < numberOfWorkers; i++ {
+		go worker(queue, i, done, killsignal, res)
 	}
 
-	// fmt.Println(res)
-	// for k, v := range res {
-	// 	fmt.Printf("%s - %d\n", k, v)
-	// }
-}
+	for _, u := range urlsArray {
+		go getRequest(queue, u, text)
+	}
 
-func createInputCh(urls []string) <-chan string {
-	out := make(chan string)
-	go func() {
-		for _, u := range urls {
-			out <- u
-		}
-		close(out)
-	}()
-	return out
-}
+	for c := 0; c < len(urlsArray); c++ {
+		<-done
+	}
 
-func getRequest(in <-chan string, word string) <-chan int {
-	fmt.Println("start")
-	out := make(chan int)
-	go func() {
-		for n := range in {
-			// fmt.Println(n)
-			var client http.Client
-			url := "http://" + n
-			resp, err := client.Get(url)
-			if err != nil {
-				fmt.Println(err.Error())
-				os.Exit(1)
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode == http.StatusOK {
-				bodyBytes, err := ioutil.ReadAll(resp.Body)
-				if err != nil {
-					os.Exit(1)
-				}
-				bodyString := string(bodyBytes)
-				res := 0
-				reg, err := regexp.Compile("[^a-zA-Z0-9]+")
-				if err != nil {
-					fmt.Println(err.Error())
-					os.Exit(1)
-				}
-				processedString := reg.ReplaceAllString(bodyString, " ")
-				arr := strings.Split(processedString, " ")
-				for i := 0; i < len(arr); i++ {
-					if arr[i] == word {
-						res += 1
-					}
-				}
-				fmt.Println("res", n, res)
-				out <- res
-			}
-		}
-		close(out)
-	}()
+	close(killsignal)
 	time.Sleep(2 * time.Second)
-	fmt.Println("end")
-	return out
-}
-
-func fanIn(input1, input2 <-chan int) <-chan int {
-	c := make(chan int)
-	go func() {
-		for {
-			select {
-			case s := <-input1:
-				c <- s
-			case s := <-input2:
-				c <- s
-			}
+	for val := range res {
+		if res[val] == -1 {
+			fmt.Printf("%s - wrong url\n", val)
+			continue
 		}
-	}()
-	return c
+		fmt.Printf("%s - %d\n", val, res[val])
+	}
 }
 
-// "go.lintTool":"golangci-lint",
-// "go.lintFlags": [
-//   "--fast"
-// ]
+func getRequest(q chan Result, u string, word *string) {
+	var client http.Client
+	url := "http://" + u
+	resp, err := client.Get(url)
+	if err != nil {
+		fmt.Println(err.Error())
+		q <- Result{u, -1}
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		os.Exit(1)
+	}
+	bodyString := string(bodyBytes)
+	res := Result{u, 0}
+	reg, err := regexp.Compile("[^a-zA-Z0-9]+")
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
+	processedString := reg.ReplaceAllString(bodyString, " ")
+	arr := strings.Split(processedString, " ")
+	for i := 0; i < len(arr); i++ {
+		if arr[i] == *word {
+			res.count += 1
+		}
+	}
+	q <- res
+}
+
+func worker(queue chan Result, worknumber int, done, ks chan bool, res map[string]int) {
+	for true {
+		select {
+		case k := <-queue:
+			res[k.url] = k.count
+			done <- true
+		case <-ks:
+			return
+		}
+	}
+}
